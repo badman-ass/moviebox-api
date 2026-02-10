@@ -1,4 +1,4 @@
-name: Create CinemaHub Flutter App
+name: Create and Build CinemaHub
 
 on:
   workflow_dispatch:
@@ -7,132 +7,47 @@ permissions:
   contents: write
 
 jobs:
-  create-files:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Create Directories
+      - name: Create App Files
         run: |
           mkdir -p cinemahub_flutter/lib
-          mkdir -p cinemahub_flutter/android/app/src/main
-
-      - name: Create pubspec.yaml
-        run: |
           cat <<EOF > cinemahub_flutter/pubspec.yaml
           name: cinemahub
-          description: A new Flutter project.
-          publish_to: 'none'
-          version: 1.0.0+1
-          environment:
-            sdk: '>=3.0.0 <4.0.0'
           dependencies:
-            flutter:
-              sdk: flutter
+            flutter: { sdk: flutter }
             http: ^1.1.0
-            url_launcher: ^6.1.11
-          dev_dependencies:
-            flutter_test:
-              sdk: flutter
-            flutter_lints: ^2.0.0
-          flutter:
-            uses-material-design: true
+          flutter: { uses-material-design: true }
           EOF
-
-      - name: Create main.dart (The App Code)
-        run: |
           cat <<EOF > cinemahub_flutter/lib/main.dart
           import 'package:flutter/material.dart';
-          import 'dart:convert';
-          import 'package:http/http.dart' as http;
-
-          void main() => runApp(const MyApp());
-
-          class MyApp extends StatelessWidget {
-            const MyApp({super.key});
-            @override
-            Widget build(BuildContext context) {
-              return MaterialApp(
-                title: 'CinemaHub',
-                theme: ThemeData.dark(),
-                home: const MovieListScreen(),
-              );
-            }
-          }
-
-          class MovieListScreen extends StatefulWidget {
-            const MovieListScreen({super.key});
-            @override
-            State<MovieListScreen> createState() => _MovieListScreenState();
-          }
-
-          class _MovieListScreenState extends State<MovieListScreen> {
-            // REPLACE THIS URL WITH YOUR OWN API IF NEEDED
-            static const String apiHost = "https://yts.mx/api/v2/list_movies.json";
-            
-            List movies = [];
-            bool isLoading = true;
-
-            @override
-            void initState() {
-              super.initState();
-              fetchMovies();
-            }
-
-            Future<void> fetchMovies() async {
-              try {
-                final response = await http.get(Uri.parse(apiHost));
-                if (response.statusCode == 200) {
-                  final data = json.decode(response.body);
-                  setState(() {
-                    // Adjust this based on your API structure
-                    movies = data['data']['movies']; 
-                    isLoading = false;
-                  });
-                }
-              } catch (e) {
-                print(e);
-              }
-            }
-
-            @override
-            Widget build(BuildContext context) {
-              return Scaffold(
-                appBar: AppBar(title: const Text('CinemaHub - No Ads')),
-                body: isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : ListView.builder(
-                        itemCount: movies.length,
-                        itemBuilder: (context, index) {
-                          final movie = movies[index];
-                          return ListTile(
-                            leading: Image.network(movie['medium_cover_image'] ?? ''),
-                            title: Text(movie['title']),
-                            subtitle: Text(movie['year'].toString()),
-                          );
-                        },
-                      ),
-              );
-            }
-          }
+          void main() => runApp(MaterialApp(home: Scaffold(body: Center(child: Text('CinemaHub Ready')))));
           EOF
 
-      - name: Create .gitignore
-        run: |
-          cat <<EOF > cinemahub_flutter/.gitignore
-          build/
-          .dart_tool/
-          .flutter-plugins
-          .flutter-plugins-dependencies
-          .packages
-          EOF
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
 
-      - name: Commit Files
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.19.0'
+
+      - name: Build APK
+        working-directory: ./cinemahub_flutter
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git add .
-          git commit -m "Auto-generated Flutter App Files"
-          git push
+          flutter pub get
+          flutter build apk --release --no-tree-shake-icons
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: cinema-app-file
+          path: cinemahub_flutter/build/app/outputs/flutter-apk/app-release.apk
           
