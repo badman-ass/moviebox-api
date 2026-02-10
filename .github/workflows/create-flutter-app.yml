@@ -1,4 +1,4 @@
-name: Create and Build CinemaHub Fixed
+name: CinemaHub Final Build
 
 on:
   workflow_dispatch:
@@ -24,33 +24,19 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      - name: Generate App Skeleton
+      - name: 1. Generate App Skeleton
         run: |
-          # This command creates all the missing Android files automatically
+          # This creates the hidden Android folders that were missing before
           flutter create cinemahub_flutter --project-name cinemahub --org com.cinemahub
 
-      - name: Add Your Custom Code
+      - name: 2. Fix Internet Permission (Fixes Black Screen)
         run: |
-          # Now we overwrite the default app with your Movie app code
-          cat <<EOF > cinemahub_flutter/pubspec.yaml
-          name: cinemahub
-          description: A new Flutter project.
-          publish_to: 'none'
-          version: 1.0.0+1
-          environment:
-            sdk: '>=3.0.0 <4.0.0'
-          dependencies:
-            flutter:
-              sdk: flutter
-            http: ^1.1.0
-          dev_dependencies:
-            flutter_test:
-              sdk: flutter
-            flutter_lints: ^2.0.0
-          flutter:
-            uses-material-design: true
-          EOF
+          # This adds the permission so the app can actually talk to the internet
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' cinemahub_flutter/android/app/src/main/AndroidManifest.xml
 
+      - name: 3. Add Movie App Logic
+        run: |
+          # We overwrite the default app with your Movie UI
           cat <<EOF > cinemahub_flutter/lib/main.dart
           import 'package:flutter/material.dart';
           import 'dart:convert';
@@ -63,7 +49,7 @@ jobs:
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
-                title: 'CinemaHub',
+                debugShowCheckedModeBanner: false,
                 theme: ThemeData.dark(),
                 home: const MovieListScreen(),
               );
@@ -77,9 +63,6 @@ jobs:
           }
 
           class _MovieListScreenState extends State<MovieListScreen> {
-            // REPLACE THIS WITH YOUR MOVIE API LATER
-            static const String apiHost = "https://yts.mx/api/v2/list_movies.json";
-            
             List movies = [];
             bool isLoading = true;
 
@@ -91,16 +74,15 @@ jobs:
 
             Future<void> fetchMovies() async {
               try {
-                final response = await http.get(Uri.parse(apiHost));
+                final response = await http.get(Uri.parse("https://yts.mx/api/v2/list_movies.json"));
                 if (response.statusCode == 200) {
                   final data = json.decode(response.body);
                   setState(() {
-                    movies = data['data']['movies']; 
+                    movies = data['data']['movies'] ?? [];
                     isLoading = false;
                   });
                 }
               } catch (e) {
-                print(e);
                 setState(() => isLoading = false);
               }
             }
@@ -108,17 +90,46 @@ jobs:
             @override
             Widget build(BuildContext context) {
               return Scaffold(
-                appBar: AppBar(title: const Text('CinemaHub Clean')),
+                backgroundColor: Colors.black,
+                appBar: AppBar(
+                  title: const Text('CinemaHub Live'),
+                  backgroundColor: Colors.redAccent,
+                ),
                 body: isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : ListView.builder(
+                    ? const Center(child: CircularProgressIndicator(color: Colors.red))
+                    : GridView.builder(
+                        padding: const EdgeInsets.all(10),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          childAspectRatio: 0.7,
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                        ),
                         itemCount: movies.length,
                         itemBuilder: (context, index) {
-                          final movie = movies[index];
-                          return ListTile(
-                            leading: Image.network(movie['medium_cover_image'] ?? ''),
-                            title: Text(movie['title']),
-                            subtitle: Text(movie['year'].toString()),
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Image.network(movies[index]['medium_cover_image'], fit: BoxFit.cover),
+                                Positioned(
+                                  bottom: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: Container(
+                                    color: Colors.black54,
+                                    padding: const EdgeInsets.all(5),
+                                    child: Text(
+                                      movies[index]['title'],
+                                      style: const TextStyle(fontSize: 12),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                )
+                              ],
+                            ),
                           );
                         },
                       ),
@@ -127,15 +138,15 @@ jobs:
           }
           EOF
 
-      - name: Build APK
+      - name: 4. Build APK
         working-directory: ./cinemahub_flutter
         run: |
-          flutter pub get
+          flutter pub add http
           flutter build apk --release --no-tree-shake-icons
 
-      - name: Upload APK
+      - name: 5. Upload Fixed APK
         uses: actions/upload-artifact@v4
         with:
-          name: cinema-app-final
+          name: cinemahub-fixed-apk
           path: cinemahub_flutter/build/app/outputs/flutter-apk/app-release.apk
           
