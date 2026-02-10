@@ -1,4 +1,4 @@
-name: CinemaHub Final Build V2
+name: CinemaHub V3 Final
 
 on:
   workflow_dispatch:
@@ -24,25 +24,34 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      - name: 1. Generate App Skeleton
+      - name: 1. Clean and Create
         run: |
+          # Clean up any old folders to avoid "Exit code 1"
+          rm -rf cinemahub_flutter
           flutter create cinemahub_flutter --project-name cinemahub --org com.cinemahub
 
-      - name: 2. Fix Permissions & API Security
+      - name: 2. Unlock Internet (The Black Screen Fix)
         run: |
-          # Inject Internet Permission
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' cinemahub_flutter/android/app/src/main/AndroidManifest.xml
-          # Allow non-HTTPS traffic just in case
-          sed -i 's/<application/<application android:usesCleartextTraffic="true"/' cinemahub_flutter/android/app/src/main/AndroidManifest.xml
+          # This command is safer and won't cause "Exit code 1"
+          cd cinemahub_flutter/android/app/src/main
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' AndroidManifest.xml
 
-      - name: 3. Add Movie App Logic (With Error Reporting)
+      - name: 3. Install Movie Library
+        working-directory: ./cinemahub_flutter
+        run: flutter pub add http
+
+      - name: 4. Apply Final Movie Logic
         run: |
           cat <<EOF > cinemahub_flutter/lib/main.dart
           import 'package:flutter/material.dart';
           import 'dart:convert';
           import 'package:http/http.dart' as http;
 
-          void main() => runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MovieListScreen()));
+          void main() => runApp(MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData.dark(),
+            home: const MovieListScreen(),
+          ));
 
           class MovieListScreen extends StatefulWidget {
             const MovieListScreen({super.key});
@@ -53,7 +62,7 @@ jobs:
           class _MovieListScreenState extends State<MovieListScreen> {
             List movies = [];
             bool isLoading = true;
-            String error = "";
+            String status = "Loading Movies...";
 
             @override
             void initState() {
@@ -63,10 +72,10 @@ jobs:
 
             Future<void> fetchMovies() async {
               try {
-                // We add headers here to pretend we are a real web browser
+                // Using a 'User-Agent' makes the server think we are a browser
                 final response = await http.get(
-                  Uri.parse("https://yts.mx/api/v2/list_movies.json?limit=20&sort_by=year"),
-                  headers: {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+                  Uri.parse("https://yts.mx/api/v2/list_movies.json?limit=20"),
+                  headers: {"User-Agent": "Mozilla/5.0"}
                 );
                 
                 if (response.statusCode == 200) {
@@ -77,13 +86,13 @@ jobs:
                   });
                 } else {
                   setState(() {
-                    error = "Server rejected us: ${response.statusCode}";
+                    status = "Error: \${response.statusCode}";
                     isLoading = false;
                   });
                 }
               } catch (e) {
                 setState(() {
-                  error = "Connection Failed: Check internet";
+                  status = "Connection Failed. Please check internet.";
                   isLoading = false;
                 });
               }
@@ -92,57 +101,48 @@ jobs:
             @override
             Widget build(BuildContext context) {
               return Scaffold(
-                backgroundColor: const Color(0xFF121212), // Dark grey, not black
-                appBar: AppBar(
-                  title: const Text('CinemaHub Live'),
-                  backgroundColor: Colors.red[900],
-                  actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: () {
-                    setState(() => isLoading = true);
-                    fetchMovies();
-                  })],
-                ),
-                body: isLoading
-                    ? const Center(child: CircularProgressIndicator(color: Colors.red))
-                    : error.isNotEmpty
-                        ? Center(child: Text(error, style: const TextStyle(color: Colors.white)))
-                        : GridView.builder(
-                            padding: const EdgeInsets.all(10),
-                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              childAspectRatio: 0.7,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                            ),
-                            itemCount: movies.length,
-                            itemBuilder: (context, index) {
-                              return Card(
-                                color: Colors.grey[900],
-                                child: Column(
-                                  children: [
-                                    Expanded(child: Image.network(movies[index]['medium_cover_image'], fit: BoxFit.cover)),
-                                    Padding(
-                                      padding: const EdgeInsets.all(8.0),
-                                      child: Text(movies[index]['title'], style: const TextStyle(color: Colors.white, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
+                backgroundColor: const Color(0xFF1A1A1A),
+                appBar: AppBar(title: const Text('CinemaHub V3'), backgroundColor: Colors.red[900]),
+                body: isLoading 
+                  ? Center(child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(color: Colors.red),
+                        const SizedBox(height: 20),
+                        Text(status)
+                      ],
+                    ))
+                  : GridView.builder(
+                      padding: const EdgeInsets.all(10),
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2, childAspectRatio: 0.7, crossAxisSpacing: 10, mainAxisSpacing: 10,
+                      ),
+                      itemCount: movies.length,
+                      itemBuilder: (context, index) {
+                        return Column(
+                          children: [
+                            Expanded(child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.network(movies[index]['medium_cover_image'], fit: BoxFit.cover),
+                            )),
+                            const SizedBox(height: 5),
+                            Text(movies[index]['title'], maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ],
+                        );
+                      },
+                    ),
               );
             }
           }
           EOF
 
-      - name: 4. Build APK
+      - name: 5. Build Final APK
         working-directory: ./cinemahub_flutter
-        run: |
-          flutter pub add http
-          flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons
 
-      - name: 5. Upload APK
+      - name: 6. Upload Working APK
         uses: actions/upload-artifact@v4
         with:
-          name: cinemahub-v2-fixed
+          name: CinemaHub-V3-Working
           path: cinemahub_flutter/build/app/outputs/flutter-apk/app-release.apk
           
