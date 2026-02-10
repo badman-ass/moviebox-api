@@ -1,4 +1,4 @@
-name: CinemaHub V4 Final
+name: CinemaHub V5 Diagnostic
 
 on:
   workflow_dispatch:
@@ -24,31 +24,24 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
-      - name: 1. Clean Environment
-        run: rm -rf cinemahub_flutter
-
-      - name: 2. Create Project
-        run: flutter create cinemahub_flutter --project-name cinemahub --org com.cinemahub
-
-      - name: 3. Inject Internet Fix
+      - name: 1. Create Project
         run: |
-          # Robust way to add internet permission
+          rm -rf cinemahub_flutter
+          flutter create cinemahub_flutter --project-name cinemahub --org com.cinemahub
+
+      - name: 2. Inject Internet Permissions
+        run: |
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' cinemahub_flutter/android/app/src/main/AndroidManifest.xml
-          # Add network security rule for better compatibility
           sed -i 's/<application/<application android:usesCleartextTraffic="true"/' cinemahub_flutter/android/app/src/main/AndroidManifest.xml
 
-      - name: 4. Final App Code (With Timeout)
+      - name: 3. Diagnostic Movie Code
         run: |
           cat <<EOF > cinemahub_flutter/lib/main.dart
           import 'package:flutter/material.dart';
           import 'dart:convert';
           import 'package:http/http.dart' as http;
 
-          void main() => runApp(MaterialApp(
-            debugShowCheckedModeBanner: false,
-            theme: ThemeData.dark(),
-            home: const MovieListScreen(),
-          ));
+          void main() => runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: MovieListScreen()));
 
           class MovieListScreen extends StatefulWidget {
             const MovieListScreen({super.key});
@@ -59,7 +52,7 @@ jobs:
           class _MovieListScreenState extends State<MovieListScreen> {
             List movies = [];
             bool isLoading = true;
-            String statusText = "Connecting to Movie Server...";
+            String logMessage = "Starting...";
 
             @override
             void initState() {
@@ -68,90 +61,73 @@ jobs:
             }
 
             Future<void> fetchMovies() async {
-              setState(() { isLoading = true; statusText = "Connecting..."; });
-              try {
-                // We add a 15-second timeout so it doesn't stay on "Loading" forever
-                final response = await http.get(
-                  Uri.parse("https://yts.mx/api/v2/list_movies.json?limit=20"),
-                  headers: {"User-Agent": "Mozilla/5.0"}
-                ).timeout(const Duration(seconds: 15));
-                
-                if (response.statusCode == 200) {
-                  final data = json.decode(response.body);
-                  setState(() {
-                    movies = data['data']['movies'] ?? [];
-                    isLoading = false;
-                  });
-                } else {
-                  setState(() { statusText = "Server Error: \${response.statusCode}"; isLoading = false; });
+              setState(() { isLoading = true; logMessage = "Trying main server..."; });
+              
+              // List of mirrors to try
+              List<String> apis = [
+                "https://yts.mx/api/v2/list_movies.json?limit=20",
+                "https://yts.pm/api/v2/list_movies.json?limit=20",
+              ];
+
+              for (String url in apis) {
+                try {
+                  final response = await http.get(
+                    Uri.parse(url),
+                    headers: {
+                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                      "Accept": "application/json",
+                    }
+                  ).timeout(const Duration(seconds: 10));
+
+                  if (response.statusCode == 200) {
+                    final data = json.decode(response.body);
+                    setState(() { movies = data['data']['movies'] ?? []; isLoading = false; });
+                    return; // Stop if it works!
+                  } else {
+                    setState(() { logMessage = "Server Error: \${response.statusCode}"; });
+                  }
+                } catch (e) {
+                  setState(() { logMessage = "Technical Error: \$e"; });
                 }
-              } catch (e) {
-                setState(() { 
-                  statusText = "Site Blocked or No Internet.\nTry using a VPN.";
-                  isLoading = false; 
-                });
               }
+              setState(() { isLoading = false; });
             }
 
             @override
             Widget build(BuildContext context) {
               return Scaffold(
-                backgroundColor: const Color(0xFF121212),
-                appBar: AppBar(
-                  title: const Text('CinemaHub V4'),
-                  backgroundColor: Colors.red[900],
-                  actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: fetchMovies)],
-                ),
+                backgroundColor: Colors.black,
+                appBar: AppBar(title: const Text('CinemaHub Diagnostic'), backgroundColor: Colors.red),
                 body: isLoading 
                   ? Center(child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const CircularProgressIndicator(color: Colors.red),
-                        const SizedBox(height: 20),
-                        Text(statusText, textAlign: TextAlign.center),
-                      ],
+                      children: [const CircularProgressIndicator(), const SizedBox(height: 20), Text(logMessage)],
                     ))
                   : movies.isEmpty
-                    ? Center(child: Text(statusText))
-                    : GridView.builder(
-                        padding: const EdgeInsets.all(10),
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2, childAspectRatio: 0.7, crossAxisSpacing: 10, mainAxisSpacing: 10,
-                        ),
+                    ? Center(child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Text("FAILED:\n\$logMessage", textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+                      ))
+                    : ListView.builder(
                         itemCount: movies.length,
-                        itemBuilder: (context, index) {
-                          return Card(
-                            clipBehavior: Clip.antiAlias,
-                            child: Column(
-                              children: [
-                                Expanded(child: Image.network(
-                                  movies[index]['medium_cover_image'] ?? '', 
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (c, e, s) => const Icon(Icons.movie, size: 50),
-                                )),
-                                Padding(
-                                  padding: const EdgeInsets.all(4.0),
-                                  child: Text(movies[index]['title'] ?? 'No Title', maxLines: 1, overflow: TextOverflow.ellipsis),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
+                        itemBuilder: (context, index) => ListTile(
+                          leading: Image.network(movies[index]['small_cover_image']),
+                          title: Text(movies[index]['title']),
+                        ),
                       ),
               );
             }
           }
           EOF
 
-      - name: 5. Build and Upload
+      - name: 4. Build and Upload
         working-directory: ./cinemahub_flutter
         run: |
           flutter pub add http
           flutter build apk --release --no-tree-shake-icons
 
-      - name: 6. Final Artifact
+      - name: 5. Final Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CinemaHub-V4-Stable
+          name: CinemaHub-Diagnostic-APK
           path: cinemahub_flutter/build/app/outputs/flutter-apk/app-release.apk
-          
