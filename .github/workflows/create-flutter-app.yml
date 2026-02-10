@@ -1,4 +1,4 @@
-name: Create and Build CinemaHub
+name: Create and Build CinemaHub Fixed
 
 on:
   workflow_dispatch:
@@ -13,21 +13,6 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v4
 
-      - name: Create App Files
-        run: |
-          mkdir -p cinemahub_flutter/lib
-          cat <<EOF > cinemahub_flutter/pubspec.yaml
-          name: cinemahub
-          dependencies:
-            flutter: { sdk: flutter }
-            http: ^1.1.0
-          flutter: { uses-material-design: true }
-          EOF
-          cat <<EOF > cinemahub_flutter/lib/main.dart
-          import 'package:flutter/material.dart';
-          void main() => runApp(MaterialApp(home: Scaffold(body: Center(child: Text('CinemaHub Ready')))));
-          EOF
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -39,6 +24,109 @@ jobs:
         with:
           flutter-version: '3.19.0'
 
+      - name: Generate App Skeleton
+        run: |
+          # This command creates all the missing Android files automatically
+          flutter create cinemahub_flutter --project-name cinemahub --org com.cinemahub
+
+      - name: Add Your Custom Code
+        run: |
+          # Now we overwrite the default app with your Movie app code
+          cat <<EOF > cinemahub_flutter/pubspec.yaml
+          name: cinemahub
+          description: A new Flutter project.
+          publish_to: 'none'
+          version: 1.0.0+1
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            http: ^1.1.0
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^2.0.0
+          flutter:
+            uses-material-design: true
+          EOF
+
+          cat <<EOF > cinemahub_flutter/lib/main.dart
+          import 'package:flutter/material.dart';
+          import 'dart:convert';
+          import 'package:http/http.dart' as http;
+
+          void main() => runApp(const MyApp());
+
+          class MyApp extends StatelessWidget {
+            const MyApp({super.key});
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                title: 'CinemaHub',
+                theme: ThemeData.dark(),
+                home: const MovieListScreen(),
+              );
+            }
+          }
+
+          class MovieListScreen extends StatefulWidget {
+            const MovieListScreen({super.key});
+            @override
+            State<MovieListScreen> createState() => _MovieListScreenState();
+          }
+
+          class _MovieListScreenState extends State<MovieListScreen> {
+            // REPLACE THIS WITH YOUR MOVIE API LATER
+            static const String apiHost = "https://yts.mx/api/v2/list_movies.json";
+            
+            List movies = [];
+            bool isLoading = true;
+
+            @override
+            void initState() {
+              super.initState();
+              fetchMovies();
+            }
+
+            Future<void> fetchMovies() async {
+              try {
+                final response = await http.get(Uri.parse(apiHost));
+                if (response.statusCode == 200) {
+                  final data = json.decode(response.body);
+                  setState(() {
+                    movies = data['data']['movies']; 
+                    isLoading = false;
+                  });
+                }
+              } catch (e) {
+                print(e);
+                setState(() => isLoading = false);
+              }
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                appBar: AppBar(title: const Text('CinemaHub Clean')),
+                body: isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView.builder(
+                        itemCount: movies.length,
+                        itemBuilder: (context, index) {
+                          final movie = movies[index];
+                          return ListTile(
+                            leading: Image.network(movie['medium_cover_image'] ?? ''),
+                            title: Text(movie['title']),
+                            subtitle: Text(movie['year'].toString()),
+                          );
+                        },
+                      ),
+              );
+            }
+          }
+          EOF
+
       - name: Build APK
         working-directory: ./cinemahub_flutter
         run: |
@@ -48,6 +136,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: cinema-app-file
+          name: cinema-app-final
           path: cinemahub_flutter/build/app/outputs/flutter-apk/app-release.apk
           
